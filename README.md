@@ -3,6 +3,12 @@ Our official ground porcessing engine.
 
 This python project was made in vs code and is tied to a virtual environment. To access the environment:
 
+libraries:
+pip install serial
+pip install matplotlib
+see in Sloth.py
+
+
 On windows:
 - Enable access in terminal by:
 Set-ExecutionPolicy Unrestricted -Scope Process
@@ -12,7 +18,7 @@ cd "C:\Users\Felhasznalo\Roli\Celeritas\Sloth"
 .venv\Scripts\activate
 - Input the path to \interpreter, for example:
 cd "C:\Users\Felhasznalo\Roli\Celeritas\Sloth\interpreter"
-- Run Sloth
+- Run Sloth:
 python Sloth.py
 
 
