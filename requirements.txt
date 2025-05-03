@@ -1,0 +1,4 @@
+libraries:
+pip install serial
+pip install matplotlib
+see in Sloth.py
