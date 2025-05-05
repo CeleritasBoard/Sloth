@@ -2,8 +2,13 @@ import serial
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-import time
 import csv
+import threading
+import time
+import threading
+
+
+
 
 Data_buffer = []
 packet_info = []
@@ -83,24 +88,58 @@ def print_data():
     for k in range(len(Data_buffer)):
         print(Data_buffer[k], packet_info[k])
 
+
+
 def write_loop():
+    global end
+    global wait
+    wait = 0
     end = 0
+    global ser
+    ser = serial.Serial('COM3', 115200, timeout=0.01)
+
+    def pollI2C():
+        global end
+        global wait
+        global ser
+        while end == 0:
+            if wait == 0:
+                react = ser.readline()
+                if(react != b''):
+                    print(react)
+        return
+
+    def user_input():
+        global end
+        global wait
+        global ser
+
+
+        while end == 0:
+            INPUT = input()
+            wait = 1
+            if(INPUT == "EXIT"):
+                end = 1
+                return
+            time.sleep(0.1)
+            INPUT = INPUT.encode("utf-8")
+            ser.write(INPUT)
+            wait = 0
+        return
+    
     print("Input \" EXIT \" to exit the loop")
-    while end == 0:
-        INPUT = input()
-        if(INPUT == "EXIT"):
-            end = 1
-            continue
-        INPUT = INPUT.encode("utf-8")
-        ser = serial.Serial('COM3', 115200, timeout=1/10)
-        ser.write(INPUT)
-        react = 1
-        while react:
-            react = ser.readline()
-            if(react == b''):
-                continue
-            print(react)
-        ser.close()
+
+    t1 = threading.Thread(target=pollI2C, args=())
+    t2 = threading.Thread(target=user_input, args=())
+
+    t1.start()
+    t2.start()
+
+    t1.join()
+    t2.join()
+
+    ser.close()
+
 
 def Display():
     print("Spectrums are found by looking for Header packets")
