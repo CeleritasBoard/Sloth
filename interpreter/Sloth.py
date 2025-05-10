@@ -56,11 +56,16 @@ def process_data():
                     packet_info.append('TIMEOUT ERROR')
                 if Data_buffer[k][13] == 247:
                     packet_info.append('CORRUPTED ERROR')
+                if Data_buffer[k][13] == 251:
+                    packet_info.append('MEASUREMENT ERROR')
         else:
             if Data_buffer[k] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
                 packet_info.append('Startup packet')
             else:
-                packet_info.append('Spectrum')
+                if Data_buffer[k][0:8] == [0, 170, 0, 0, 0, 0, 0, 0]:
+                    packet_info.append('Geiger count')
+                else:
+                    packet_info.append('Spectrum')
 
 def read_data():
     end = 0
@@ -171,7 +176,10 @@ def Display():
             print("Temperature at the end of the measurement: ",the_header[2]*256 + the_header[3] - 273, " °C")
             print("Time of finish: ",the_header[4]*256*256*256 + the_header[5]*256*256 + the_header[6]*256 + the_header[7], " UNIX")
             print("Number of packets:",the_header[8])
-            print("Number of channels:",the_header[8]*8)
+            if(the_header[8] == 0):
+                print("Number of channels (resolution):",1)
+            else:
+                print("Number of channels (resolution):",the_header[8]*8)
             print("Lower threshold: ",16*the_header[9]+int(hex(the_header[10])[2], 16))
             print("Higher threshold: ",256*int(hex(the_header[10])[3], 16) + the_header[11])
             print("Reference voltage at the end of the measurement:",the_header[12]*256+the_header[13]," mV")
@@ -182,25 +190,36 @@ def Display():
             if the_header[15] == checksum:
                 is_checksum_ok = "OK"
             print("Checksum:",the_header[15], "?=", checksum, is_checksum_ok)
-            the_spectrum = []
-            for n in range(positions[k]+1, positions[k]+1 + Data_buffer[positions[k]][8]):
-                grouped_bytes = []
-                for m in range(8):
-                    grouped_bytes.append(256 * Data_buffer[n][m*2] + Data_buffer[n][m*2+1])
-                the_spectrum += grouped_bytes
-            print("Spectrum contents:", the_spectrum)
-            sum = 0
-            for i in range(len(the_spectrum)):
-                sum += the_spectrum[i]
-            print("Total number of peaks:", sum)
-            channel_number = []
-            for i in range(len(the_spectrum)):
-                channel_number.append(i)
-            plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
-            plt.title('Spectrum')
-            plt.xlabel('Channel number')
-            plt.ylabel('Counts')
-            plt.show()
+
+            
+
+            if(the_header[8] == 0):
+                the_spectrum = 0
+                for i in range(8):
+                    the_spectrum += (Data_buffer[positions[k]+1][i+8])*(256**(7-i))
+                print("The geiger count:", the_spectrum)
+            else:
+                the_spectrum = []
+                for n in range(positions[k]+1, positions[k]+1 + Data_buffer[positions[k]][8]):
+                    grouped_bytes = []
+                    for m in range(8):
+                        grouped_bytes.append(256 * Data_buffer[n][m*2] + Data_buffer[n][m*2+1])
+                    the_spectrum += grouped_bytes
+                print("Spectrum contents:", the_spectrum)
+                sum = 0
+                for i in range(len(the_spectrum)):
+                    sum += the_spectrum[i]
+                print("Total number of peaks:", sum)
+                channel_number = []
+                for i in range(len(the_spectrum)):
+                    channel_number.append(i)
+                plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
+                plt.title('Spectrum')
+                plt.xlabel('Channel number')
+                plt.ylabel('Counts')
+                plt.show()
+                
+
         if pos_types[k] == 'Selftest':
             the_selftest = Data_buffer[positions[k]]
             print("Results of the Selftest")
