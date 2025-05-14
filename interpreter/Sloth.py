@@ -1,17 +1,17 @@
 import serial
 import matplotlib.pyplot as plt
+import math
 import numpy as np
 import os
 import csv
 import threading
 import time
-import threading
 
 
 
 Data_buffer = []
 packet_info = []
-
+Command = []
 
 clear = lambda: os.system('cls')
 
@@ -49,15 +49,25 @@ def process_data():
         if Data_buffer[k][0] != 0:
             if Data_buffer[k][14] == 255:
                 packet_info.append('Header')
+                continue
             if Data_buffer[k][14] == 254:
                 packet_info.append('Selftest')
+                continue
             if Data_buffer[k][14] == 213:
+                if Data_buffer[k][13] == 240:
+                    packet_info.append('TERMINATED ERROR')
+                    continue
                 if Data_buffer[k][13] == 253:
                     packet_info.append('TIMEOUT ERROR')
+                    continue
                 if Data_buffer[k][13] == 247:
                     packet_info.append('CORRUPTED ERROR')
+                    continue
                 if Data_buffer[k][13] == 251:
                     packet_info.append('MEASUREMENT ERROR')
+                    continue
+            else:
+                packet_info.append('Spectrum')
         else:
             if Data_buffer[k] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
                 packet_info.append('Startup packet')
@@ -92,7 +102,45 @@ def print_data():
     for k in range(len(Data_buffer)):
         print(Data_buffer[k], packet_info[k])
 
+def commander():
 
+    def checksum(the_bytes:list):
+        checksum = 0
+        for i in range(len(the_bytes)):
+            checksum += bin(the_bytes[i]).count('1')
+        return checksum
+
+    global Command
+    print("Select a command:")
+    print("[0]. Set duration")
+    print("[1]. Set scale")
+    print("[2]. Request measurement")
+    print("[3]. Request selftest")
+    print("[4]. Reset")
+    print("[5]. Restart")
+    print("[6]. Previous commands")
+    print("Any other to cancle")
+    command_type = input("Choose command [0-6]:")
+    if command_type == '4':
+        ID = 0
+        if (ID > 255) or (ID < 1):
+            ID = input("Command Id [1-255]:")
+        the_data = 'w0F' + str(ID)
+        the_bytes = [0x0F, int(ID), 0x00, 0x00, 0x00, 0x00, 0x00]
+        the_bytes.append(checksum(the_bytes))
+        Command.append(the_bytes)
+        converted = 'w'
+        for i in range(len(the_bytes)):
+            converted += str(the_bytes[i])
+        converted += '\r\n'
+        converted = bytes(converted, "utf-8")
+        print(the_bytes)
+        print(converted)
+        ser = serial.Serial('COM3', 115200, timeout=0.01)
+        ser.write(the_bytes)
+        print(ser.read())
+        print(ser.read())
+        ser.close()
 
 def write_loop():
     global end
@@ -162,7 +210,7 @@ def Display():
         print("Found packets:")
         alphabet = list(map(chr, range(ord('a'), ord('z')+1)))
         for i in range(len(positions)):
-            print(alphabet[i],") ID =", IDs[i], pos_types[i])
+            print("(", alphabet[i],") ID =", IDs[i], pos_types[i])
         which_spectrum = input("Input a lowercase letter\n")
         k=0
         for k in range(len(alphabet)):
@@ -213,6 +261,54 @@ def Display():
                 channel_number = []
                 for i in range(len(the_spectrum)):
                     channel_number.append(i)
+                
+
+                #moving average calculation:
+                '''
+                xs = []
+                ys = []
+                for i in range(3, len(the_spectrum)-3):
+                    xs.append(i)
+                    ys.append(np.average(the_spectrum[i-3:i+4]))'''
+
+                #low pass filter
+                parameter = 2
+                while (parameter < 0) or (parameter > 1):
+                    parameter = input("Give a smoothing parameter for the curve: 0<=p<=1, \nenter nothing for p = 0.5\n")
+                    if parameter == '': parameter = 0.5
+                    parameter = float(parameter)
+
+                xs = [0]
+                ys = [0]
+
+                for i in range(1, len(the_spectrum)-1):
+                        xs.append(i)
+                        ys.append(parameter * ys[i-1] + (1-parameter) * the_spectrum[i])
+
+                #50th order polinom regression -not so good
+                '''coef_row = []
+                b = []
+                for i in range(len(the_spectrum)):
+                    temp = []
+                    for j in range(50):
+                        temp.append(np.float64(i**j))
+                    coef_row.append(temp)
+                    b.append(np.float64(the_spectrum[i]))
+
+                solution = np.linalg.matmul(np.linalg.matmul(np.linalg.inv(np.linalg.matmul(np.matrix_transpose(coef_row), coef_row)), np.matrix_transpose(coef_row)), b)
+                s = np.matrix.tolist(solution)
+
+                ys = []
+                xs = []
+                for i in range(2048):
+                    temp_ys = 0
+                    for j in range(50):
+                        temp_ys += s[j]*(i*len(b)/2048)**j
+                    ys.append(temp_ys)
+                    xs.append(i*len(b)/2048)'''
+
+
+                plt.plot(xs, ys, 'red', linewidth=1)
                 plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
                 plt.title('Spectrum')
                 plt.xlabel('Channel number')
@@ -274,11 +370,13 @@ def import_data():
     overwrite = input("Overwrite memory buffer? 0 = No, 1 = Yes, else = abort\n")
     if overwrite == '0' or overwrite == '1':
         if overwrite == '1':
+            print("Overwriting memory")
             global Data_buffer
             global packet_info
             Data_buffer = []
             packet_info = []
-        print("Append to memory")
+        if overwrite == 0:
+            print("Append to memory")
         with open(file_name + ".cel", "r") as f:
             reader = csv.reader(f, delimiter=" ")
             for line in reader:
@@ -287,44 +385,50 @@ def import_data():
                     items.append(int(line[k]))
                 Data_buffer.append(items)
         f.close()
-    else: print("aborted")
+    else:
+        print("aborted")
     process_data()
+
 
 def user_input():
     loopdeloop = 1
     while loopdeloop == 1:
 
         print("Options:")
-        print("1. Write / communication loop")
-        print("2. Read and store data")
-        print("3. Evaluate and Display data")
-        print("4. Print stored data")
-        print("5. Save data")
-        print("6. Import data")
-        print("7. Dump memory")
-        print("8. Clear console")
-        print("9. Exit program")
+        print("[1]. Write / communication loop")
+        print("[2]. Command Generator - under construction")
+        print("[3]. Read and store data")
+        print("[4]. Evaluate and Display data")
+        print("[5]. Print stored data")
+        print("[6]. Save data")
+        print("[7]. Import data")
+        print("[8]. Dump memory")
+        print("[9]. Clear console")
+        print("[10]. Exit program")
         Option = input("Input an integer\n")
         if Option == '1':
             write_loop()
         if Option == '2':
-            read_data()
+            print("Command Generator does not work")
+            #commander()
         if Option == '3':
-            Display()
+            read_data()
         if Option == '4':
-            print_data()
+            Display()
         if Option == '5':
-            save_data()
+            print_data()
         if Option == '6':
-            import_data()
+            save_data()
         if Option == '7':
+            import_data()
+        if Option == '8':
             global Data_buffer
             global packet_info
             Data_buffer = []
             packet_info = []
-        if Option == '8':
-            clear()
         if Option == '9':
+            clear()
+        if Option == '10':
             loopdeloop = 0
 
 user_input()        # Start the program
