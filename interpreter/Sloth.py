@@ -47,6 +47,9 @@ def process_data():
     packet_info = []
     for k in range(len(Data_buffer)):
         if Data_buffer[k][0] != 0:
+            if Data_buffer[k] == [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]:
+                packet_info.append('Empty flash dump')
+                continue
             if Data_buffer[k][14] == 255:
                 packet_info.append('Header')
                 continue
@@ -82,8 +85,10 @@ def read_data():
     while end == 0:
         read = fetch_packet()
         if((read[0] != 0) and (read[14] == 255)):
-            packetcount = read[8]
             Data_buffer.append(read)
+            if read == [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]:
+                continue
+            packetcount = read[8]
             for i in range(packetcount):
                 read_sub = fetch_packet()
                 Data_buffer.append(read_sub)
@@ -157,7 +162,7 @@ def write_loop():
         while end == 0:
             if wait == 0:
                 react = ser.readline()
-                if(react != b''):
+                if((react != b'') and (react != b'\r\n')):
                     print(react)
         return
 
