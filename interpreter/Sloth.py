@@ -273,17 +273,11 @@ def Display():
 
                 #low pass filter
                 parameter = 2
-                while (parameter < 0) or (parameter > 1):
-                    parameter = input("Give a smoothing parameter for the curve: 0<=p<=1, \nenter nothing for p = 0.5\n")
-                    if parameter == '': parameter = 0.5
+                while (parameter < 0) or (parameter > 1) or (parameter == ''):
+                    parameter = input("\nGive a smoothing parameter for the low pass filter: 0<=p<=1, \nenter nothing to discard\n")
+                    if (parameter == ''):
+                        break
                     parameter = float(parameter)
-
-                xs = [0]
-                ys = [0]
-
-                for i in range(1, len(the_spectrum)-1):
-                        xs.append(i)
-                        ys.append(parameter * ys[i-1] + (1-parameter) * the_spectrum[i])
 
                 #50th order polinom regression -not so good
                 '''coef_row = []
@@ -307,8 +301,17 @@ def Display():
                     ys.append(temp_ys)
                     xs.append(i*len(b)/2048)'''
 
+                if (parameter != ''):
+                    xs = [0]
+                    ys = [0]
 
-                plt.plot(xs, ys, 'red', linewidth=1)
+                    for i in range(1, len(the_spectrum)-1):
+                            xs.append(i)
+                            ys.append(parameter * ys[i-1] + (1-parameter) * the_spectrum[i])
+                    plt.plot(xs, ys, 'red', linewidth=1)
+                
+                
+                
                 plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
                 plt.title('Spectrum')
                 plt.xlabel('Channel number')
