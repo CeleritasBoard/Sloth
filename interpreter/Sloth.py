@@ -24,7 +24,7 @@ def fetch_packet():
     temp = []
     ser.write(b'r')
     print(ser.readline())     #discard this information
-    time.sleep(1/10)
+    time.sleep(1/50)
     temp = ser.readline()
     temp = temp[1:33].decode("utf-8")
     for k in range(16):
@@ -57,6 +57,9 @@ def process_data():
                 packet_info.append('Selftest')
                 continue
             if Data_buffer[k][14] == 213:
+                if Data_buffer[k][13] == 254:
+                    packet_info.append('UNKNOWN COMMAND ERROR')
+                    continue
                 if Data_buffer[k][13] == 240:
                     packet_info.append('TERMINATED ERROR')
                     continue
@@ -68,6 +71,12 @@ def process_data():
                     continue
                 if Data_buffer[k][13] == 251:
                     packet_info.append('MEASUREMENT ERROR')
+                    continue
+                if Data_buffer[k][13] == 223:
+                    packet_info.append('I2C QUEUE IS FULL ERROR')
+                    continue
+                if Data_buffer[k][13] == 191:
+                    packet_info.append('REQUEST QUEUE IS FULL ERROR')
                     continue
             else:
                 packet_info.append('Spectrum')
@@ -213,13 +222,15 @@ def Display():
         print("No data, Headers or Selftests")
     else:    
         print("Found packets:")
-        alphabet = list(map(chr, range(ord('a'), ord('z')+1)))
+        order = []
         for i in range(len(positions)):
-            print("(", alphabet[i],") ID =", IDs[i], pos_types[i])
-        which_spectrum = input("Input a lowercase letter\n")
+            order.append(i)
+        for i in range(len(positions)):
+            print("(", order[i],".) ID =", IDs[i], pos_types[i])
+        which_spectrum = int(input("Input an integer\n"))
         k=0
-        for k in range(len(alphabet)):
-            if(which_spectrum == alphabet[k]):
+        for k in range(len(positions)):
+            if(which_spectrum == order[k]):
                 break
         
         if pos_types[k] == 'Header':
@@ -316,8 +327,8 @@ def Display():
                     plt.plot(xs, ys, 'red', linewidth=1)
                 
                 
-                
-                plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
+                if (parameter == ''):
+                    plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
                 plt.title('Spectrum')
                 plt.xlabel('Channel number')
                 plt.ylabel('Counts')
@@ -334,6 +345,8 @@ def Display():
             print("IDs of the following two requests in queue: ID(next1) = ",the_selftest[8], "; ID(next2) =", the_selftest[9])
             print("ID of the next read in i2c queue: ", the_selftest[10])
             print("Reference voltage: ",16*the_selftest[11]+int(hex(the_selftest[12])[2], 16), " mV")
+            
+
             print("Voltage on the output of the peak holder: ",256*int(hex(the_selftest[12])[3], 16) + the_selftest[13], " mV")
             checksum = 0
             for i in range(15):
