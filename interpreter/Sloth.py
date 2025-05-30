@@ -56,6 +56,9 @@ def process_data():
             if Data_buffer[k][14] == 254:
                 packet_info.append('Selftest')
                 continue
+            if Data_buffer[k][14] == 85:
+                packet_info.append('Status report')
+                continue
             if Data_buffer[k][14] == 213:
                 if Data_buffer[k][13] == 254:
                     packet_info.append('UNKNOWN COMMAND ERROR')
@@ -77,6 +80,9 @@ def process_data():
                     continue
                 if Data_buffer[k][13] == 191:
                     packet_info.append('REQUEST QUEUE IS FULL ERROR')
+                    continue
+                if Data_buffer[k][13] == 252:
+                    packet_info.append('REQUEST QUEUE SORT ERROR')
                     continue
             else:
                 packet_info.append('Spectrum')
@@ -102,10 +108,9 @@ def read_data():
                 read_sub = fetch_packet()
                 Data_buffer.append(read_sub)
             continue
-        if(read == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]):
-            print("All zeros, no header detected: terminated read")
+        if(read[0] != 0 and read[14] == 85):
+            print("This is a status report packet, terminated read!")
             end = 1
-            continue
         Data_buffer.append(read)
     process_data()
 
@@ -206,6 +211,34 @@ def write_loop():
 
     ser.close()
 
+def testing_loop():
+    ser = serial.Serial('COM3', 115200, timeout=0.01)
+
+    while(1):
+        for i in range(6):
+            ser.write(b'r')
+            print(ser.readline())
+            print(ser.readline())
+            print(ser.readline())
+        time.sleep(2)
+
+        ser.write(b'w0740FFFFFFFFC026a51')
+        temp = ser.readline()
+        temp = temp[0:-1].decode("utf-8")
+        print(temp)
+        print(ser.readline())
+        print(ser.readline())
+        ser.write(b'w0740FFFFFFFFC026a51')
+        temp = ser.readline()
+        temp = temp[0:-1].decode("utf-8")
+        print(temp)
+        print(ser.readline())
+        print(ser.readline())
+        
+        if (temp.find("TIMEOUTED") != -1):
+            ser.close()
+            return
+        time.sleep(2)
 
 def Display():
     print("Spectrums are found by looking for Header packets")
@@ -213,7 +246,7 @@ def Display():
     pos_types = []
     IDs = []
     for i in range(len(packet_info)):
-        if packet_info[i] == 'Header' or packet_info[i] == 'Selftest':
+        if packet_info[i] == 'Header' or packet_info[i] == 'Selftest' or packet_info[i] == 'Status report':
             positions.append(i)
     for i in range(len(positions)):
         pos_types.append(packet_info[positions[i]])
@@ -235,11 +268,14 @@ def Display():
         
         if pos_types[k] == 'Header':
             the_header = Data_buffer[positions[k]]
+            print("\n----------------------------------------------")
+            print("Results of the measurement                   |")
+            print("----------------------------------------------")
             print("ID of the measurement request: ", the_header[0])
             print("Interrupt count:", the_header[1])
             print("Temperature at the end of the measurement: ",the_header[2]*256 + the_header[3] - 273, " °C")
             print("Time of finish: ",the_header[4]*256*256*256 + the_header[5]*256*256 + the_header[6]*256 + the_header[7], " UNIX")
-            print("Number of packets:",the_header[8])
+            print("Number of packets:",the_header[8] + 1)
             if(the_header[8] == 0):
                 print("Number of channels (resolution):",1)
             else:
@@ -277,6 +313,7 @@ def Display():
                 channel_number = []
                 for i in range(len(the_spectrum)):
                     channel_number.append(i)
+                print("----------------------------------------------")
                 
 
                 #moving average calculation:
@@ -337,16 +374,29 @@ def Display():
 
         if pos_types[k] == 'Selftest':
             the_selftest = Data_buffer[positions[k]]
-            print("Results of the Selftest")
+            print("\n----------------------------------------------")
+            print("Results of the Selftest                      |")
+            print("----------------------------------------------")
             print("ID of the selftest request: ", the_selftest[0])
-            print("Temperature: ",the_selftest[1]*256 + the_selftest[2] - 273, " °C")
+            print("Temperature: ",the_selftest[1]*256 + the_selftest[2] - 273," °C")
             print("Number of errors in i2c queue: ", the_selftest[3])
             print("Time of selftest: ",the_selftest[4]*256*256*256 + the_selftest[5]*256*256 + the_selftest[6]*256 + the_selftest[7], " UNIX")
-            print("IDs of the following two requests in queue: ID(next1) = ",the_selftest[8], "; ID(next2) =", the_selftest[9])
-            print("ID of the next read in i2c queue: ", the_selftest[10])
-            print("Reference voltage: ",16*the_selftest[11]+int(hex(the_selftest[12])[2], 16), " mV")
+            print("ID of the next request in Request queue: ID = ",the_selftest[8])
+            print("ID of the next read in i2c queue: ", the_selftest[9])
             
-
+            boolean_byte = the_selftest[10]
+            if (boolean_byte - 2 >= 0):
+                print("Last measurement: ABORTED")
+                boolean_byte = boolean_byte - 2
+            else:
+                print("Last measurement: finished regularly")
+            if (boolean_byte - 1 >= 0):
+                print("Backup SAVE = TRUE")
+                boolean_byte = boolean_byte - 1
+            else:
+                print("Backup SAVE = FALSE")
+                
+            print("Reference voltage: ",16*the_selftest[11]+int(hex(the_selftest[12])[2], 16), " mV")
             print("Voltage on the output of the peak holder: ",256*int(hex(the_selftest[12])[3], 16) + the_selftest[13], " mV")
             checksum = 0
             for i in range(15):
@@ -355,7 +405,44 @@ def Display():
             if the_selftest[15] == checksum:
                 is_checksum_ok = "OK"
             print("Checksum:",the_selftest[15], "?=", checksum, is_checksum_ok)
+            print("----------------------------------------------")
 
+        if pos_types[k] == 'Status report':
+            the_status_report = Data_buffer[positions[k]]
+            print("\n----------------------------------------------")
+            print("Results of the Status report                 |")
+            print("----------------------------------------------")
+            status = "UNKNOWN"
+            if (the_status_report[0] == 1):
+                status = "SLEEP"
+            if (the_status_report[0] == 2):
+                status = "IDLE"
+            if (the_status_report[0] == 3):
+                status = "STARTING"
+            if (the_status_report[0] == 4):
+                status = "RUNNING"
+            if (the_status_report[0] == 5):
+                status = "FINISHED"
+            print("Status of Celeritas: ",status)
+            print("Time of the Status report: ",the_status_report[1]*256*256*256 + the_status_report[2]*256*256 + the_status_report[3]*256 + the_status_report[4], "UNIX")
+            print("I2C cursors,")
+            print("head:", the_status_report[5], "  tail:", the_status_report[6], "  size:", the_status_report[7])
+            print("Request cursors,")
+            print("head:", the_status_report[8], "  tail:", the_status_report[9], "  size:", the_status_report[10])
+            temperature = the_status_report[11]*256 + the_status_report[12] - 273
+            if status != "IDLE":
+                print("Temperature is not measured because the status is not IDLE mode")
+            else:
+                print("Temperature: ",temperature," °C")
+            print("Current request ID: ", the_status_report[13])
+            checksum = 0
+            for i in range(15):
+               checksum += bin(the_status_report[i]).count('1')
+            is_checksum_ok = "INVALID"
+            if the_status_report[15] == checksum:
+                is_checksum_ok = "OK"
+            print("Checksum:",the_status_report[15], "?=", checksum, is_checksum_ok)
+            print("----------------------------------------------")
 
 def save_data():
     if Data_buffer == []:
@@ -415,7 +502,7 @@ def user_input():
     loopdeloop = 1
     while loopdeloop == 1:
 
-        print("Options:")
+        print("\nOptions:")
         print("[1]. Write / communication loop")
         print("[2]. Command Generator - under construction")
         print("[3]. Read and store data")
@@ -425,7 +512,8 @@ def user_input():
         print("[7]. Import data")
         print("[8]. Dump memory")
         print("[9]. Clear console")
-        print("[10]. Exit program")
+        print("[10]. Testing")
+        print("[11]. Exit program")
         Option = input("Input an integer\n")
         if Option == '1':
             write_loop()
@@ -450,6 +538,8 @@ def user_input():
         if Option == '9':
             clear()
         if Option == '10':
+            testing_loop()
+        if Option == '11':
             loopdeloop = 0
 
 user_input()        # Start the program
