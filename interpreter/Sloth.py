@@ -15,6 +15,12 @@ Command = []
 
 clear = lambda: os.system('cls')
 
+def twos_comp(val, bits):
+    
+    if (val & (1 << (bits - 1))) != 0: # if sign bit is set e.g., 8bit: 128-255
+        val = val - (1 << bits)        # compute negative value
+    return val                         # return positive value as is
+
 
 def fetch_packet():
     s = []
@@ -45,8 +51,11 @@ def process_data():
     global packet_info
     global Data_buffer
     packet_info = []
-    for k in range(len(Data_buffer)):
+    for k in range(len(Data_buffer)): #this is basicly a switch
         if Data_buffer[k][0] != 0:
+            if Data_buffer[k] == [67, 101, 108, 101, 114, 105, 116, 97, 115, 0, 0, 0, 0, 0, 0, 0]:
+                packet_info.append('\"Celeritas\" welcome message')
+                continue
             if Data_buffer[k] == [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]:
                 packet_info.append('Empty flash dump')
                 continue
@@ -84,16 +93,11 @@ def process_data():
                 if Data_buffer[k][13] == 252:
                     packet_info.append('REQUEST QUEUE SORT ERROR')
                     continue
-            else:
-                packet_info.append('Spectrum')
         else:
-            if Data_buffer[k] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
-                packet_info.append('Startup packet')
-            else:
-                if Data_buffer[k][0:8] == [0, 170, 0, 0, 0, 0, 0, 0]:
-                    packet_info.append('Geiger count')
-                else:
-                    packet_info.append('Spectrum')
+            if Data_buffer[k][14] == 170:
+                packet_info.append('Geiger count')
+                continue
+        packet_info.append('Spectrum')
 
 def read_data():
     end = 0
@@ -118,7 +122,7 @@ def print_data():
     process_data()
     if Data_buffer == []:
         print("No collected data")
-    for k in range(len(Data_buffer)):
+    for k in range(len(packet_info)):
         print(Data_buffer[k], packet_info[k])
 
 def commander():
@@ -241,6 +245,7 @@ def testing_loop():
         time.sleep(2)
 
 def Display():
+    process_data()
     print("Spectrums are found by looking for Header packets")
     positions = []
     pos_types = []
@@ -273,9 +278,13 @@ def Display():
             print("----------------------------------------------")
             print("ID of the measurement request: ", the_header[0])
             print("Interrupt count:", the_header[1])
-            print("Temperature at the end of the measurement: ",the_header[2]*256 + the_header[3] - 273, " °C")
+            print("Temperature at the start of the measurement: ",twos_comp(the_header[2], 8) - 5, " °C")
+            print("Temperature at the end of the measurement: ",twos_comp(the_header[3], 8) - 5, " °C")
             print("Time of finish: ",the_header[4]*256*256*256 + the_header[5]*256*256 + the_header[6]*256 + the_header[7], " UNIX")
-            print("Number of packets:",the_header[8] + 1)
+            if(the_header[8] == 0):
+                print("Number of packets:",2)
+            else:
+                print("Number of packets:",the_header[8] + 1)
             if(the_header[8] == 0):
                 print("Number of channels (resolution):",1)
             else:
@@ -291,13 +300,21 @@ def Display():
                 is_checksum_ok = "OK"
             print("Checksum:",the_header[15], "?=", checksum, is_checksum_ok)
 
-            
 
             if(the_header[8] == 0):
+                checksum2 = 0
+                for i in range(15):
+                    checksum2 += bin(Data_buffer[positions[k+1]][i]).count('1')
+                is_checksum_ok = "INVALID"
+                if Data_buffer[positions[k+1]][15] == checksum2:
+                    is_checksum_ok = "OK"
+                print("Geiger packet checksum:",Data_buffer[positions[k+1]][15], "?=", checksum2, is_checksum_ok)
+
                 the_spectrum = 0
                 for i in range(8):
-                    the_spectrum += (Data_buffer[positions[k]+1][i+8])*(256**(7-i))
+                    the_spectrum += (Data_buffer[positions[k]+1][i+6])*(256**(7-i))
                 print("The geiger count:", the_spectrum)
+                print("----------------------------------------------")
             else:
                 the_spectrum = []
                 for n in range(positions[k]+1, positions[k]+1 + Data_buffer[positions[k]][8]):
@@ -378,11 +395,11 @@ def Display():
             print("Results of the Selftest                      |")
             print("----------------------------------------------")
             print("ID of the selftest request: ", the_selftest[0])
-            print("Temperature: ",the_selftest[1]*256 + the_selftest[2] - 273," °C")
+            print("Temperature: ",twos_comp(the_selftest[1], 8) - 5," °C")
             print("Number of errors in i2c queue: ", the_selftest[3])
             print("Time of selftest: ",the_selftest[4]*256*256*256 + the_selftest[5]*256*256 + the_selftest[6]*256 + the_selftest[7], " UNIX")
-            print("ID of the next request in Request queue: ID = ",the_selftest[8])
-            print("ID of the next read in i2c queue: ", the_selftest[9])
+            print("ID of the next request in Request queue: ID =",the_selftest[8])
+            print("ID of the next read in i2c queue: ID =", the_selftest[9])
             
             boolean_byte = the_selftest[10]
             if (boolean_byte - 2 >= 0):
@@ -396,8 +413,10 @@ def Display():
             else:
                 print("Backup SAVE = FALSE")
                 
-            print("Reference voltage: ",16*the_selftest[11]+int(hex(the_selftest[12])[2], 16), " mV")
-            print("Voltage on the output of the peak holder: ",256*int(hex(the_selftest[12])[3], 16) + the_selftest[13], " mV")
+            print("Reference voltage: ",16*the_selftest[11]+int(hex(the_selftest[12])[2], 16), "mV")
+            print("Voltage on the output of the peak holder: ")
+            print("   1 second average",256*int(hex(the_selftest[12])[3], 16) + the_selftest[13],"mV")
+            print("   Short measurement", int(the_selftest[2]),"mV")
             checksum = 0
             for i in range(15):
                checksum += bin(the_selftest[i]).count('1')
@@ -429,11 +448,12 @@ def Display():
             print("head:", the_status_report[5], "  tail:", the_status_report[6], "  size:", the_status_report[7])
             print("Request cursors,")
             print("head:", the_status_report[8], "  tail:", the_status_report[9], "  size:", the_status_report[10])
-            temperature = the_status_report[11]*256 + the_status_report[12] - 273
+            temperature = twos_comp(the_status_report[11], 8) - 5
             if status != "IDLE":
                 print("Temperature is not measured because the status is not IDLE mode")
             else:
                 print("Temperature: ",temperature," °C")
+            print("Seconds remaining before sleep:",the_status_report[12])    
             print("Current request ID: ", the_status_report[13])
             checksum = 0
             for i in range(15):
@@ -501,7 +521,6 @@ def import_data():
 def user_input():
     loopdeloop = 1
     while loopdeloop == 1:
-
         print("\nOptions:")
         print("[1]. Write / communication loop")
         print("[2]. Command Generator - under construction")
@@ -515,8 +534,10 @@ def user_input():
         print("[10]. Testing")
         print("[11]. Exit program")
         Option = input("Input an integer\n")
+        clear()
         if Option == '1':
             write_loop()
+            clear()
         if Option == '2':
             print("Command Generator does not work")
             #commander()
@@ -541,5 +562,6 @@ def user_input():
             testing_loop()
         if Option == '11':
             loopdeloop = 0
+
 
 user_input()        # Start the program
