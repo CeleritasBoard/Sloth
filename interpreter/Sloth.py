@@ -6,6 +6,7 @@ import os
 import csv
 import threading
 import time
+from scipy.optimize import curve_fit
 
 
 
@@ -66,7 +67,10 @@ def process_data():
                 packet_info.append('Selftest')
                 continue
             if Data_buffer[k][14] == 85:
-                packet_info.append('Status report')
+                packet_info.append('Default status report')
+                continue
+            if Data_buffer[k][14] == 86:
+                packet_info.append('Forced status report')
                 continue
             if Data_buffer[k][14] == 213:
                 if Data_buffer[k][13] == 254:
@@ -113,7 +117,7 @@ def read_data():
                 Data_buffer.append(read_sub)
             continue
         if(read[0] != 0 and read[14] == 85):
-            print("This is a status report packet, terminated read!")
+            print("This is a default status report packet, terminated read!")
             end = 1
         Data_buffer.append(read)
     process_data()
@@ -251,11 +255,14 @@ def Display():
     pos_types = []
     IDs = []
     for i in range(len(packet_info)):
-        if packet_info[i] == 'Header' or packet_info[i] == 'Selftest' or packet_info[i] == 'Status report':
+        if packet_info[i] == 'Header' or packet_info[i] == 'Selftest' or packet_info[i] == 'Forced status report' or packet_info[i] == 'Default status report':
             positions.append(i)
     for i in range(len(positions)):
+        if (packet_info[positions[i]] != 'Forced status report' and packet_info[positions[i]] != 'Default status report'):
+            IDs.append(Data_buffer[positions[i]][0])
+        else: 
+            IDs.append(Data_buffer[positions[i]][12])
         pos_types.append(packet_info[positions[i]])
-        IDs.append(Data_buffer[positions[i]][0])
     if IDs == []:
         print("No data, Headers or Selftests")
     else:    
@@ -264,7 +271,10 @@ def Display():
         for i in range(len(positions)):
             order.append(i)
         for i in range(len(positions)):
-            print("(", order[i],".) ID =", IDs[i], pos_types[i])
+            if (pos_types[i] != 'Forced status report' and pos_types[i] != 'Default status report'):
+                print("(", order[i],".) ID =", IDs[i], pos_types[i])
+            else:
+                print("(", order[i],".)", pos_types[i],"at ID =", IDs[i])
         which_spectrum = int(input("Input an integer\n"))
         k=0
         for k in range(len(positions)):
@@ -289,9 +299,14 @@ def Display():
                 print("Number of channels (resolution):",1)
             else:
                 print("Number of channels (resolution):",the_header[8]*8)
-            print("Lower threshold: ",16*the_header[9]+int(hex(the_header[10])[2], 16))
-            print("Higher threshold: ",256*int(hex(the_header[10])[3], 16) + the_header[11])
-            print("Reference voltage at the end of the measurement:",the_header[12]*256+the_header[13]," mV")
+            ref_voltage = the_header[12]*256+the_header[13]
+            low_thres_adc = 16*the_header[9]+int(hex(the_header[10])[2], 16)
+            low_thres = int(low_thres_adc / 4095 * ref_voltage)
+            high_thres_adc = 256*int(hex(the_header[10])[3], 16) + the_header[11]
+            high_thres = int(high_thres_adc / 4095 * ref_voltage)
+            print("Lower threshold: ",low_thres,"mV,",low_thres_adc,"ADC bits")
+            print("Higher threshold: ",high_thres,"mV,",high_thres_adc,"ADC bits")
+            print("Reference voltage at the end of the measurement:",ref_voltage," mV")
             checksum = 0
             for i in range(15):
                checksum += bin(the_header[i]).count('1')
@@ -331,45 +346,32 @@ def Display():
                 for i in range(len(the_spectrum)):
                     channel_number.append(i)
                 print("----------------------------------------------")
-                
-
-                #moving average calculation:
-                '''
-                xs = []
-                ys = []
-                for i in range(3, len(the_spectrum)-3):
-                    xs.append(i)
-                    ys.append(np.average(the_spectrum[i-3:i+4]))'''
 
                 #low pass filter
                 parameter = 2
                 while (parameter < 0) or (parameter > 1) or (parameter == ''):
-                    parameter = input("\nGive a smoothing parameter for the low pass filter: 0<=p<=1, \nenter nothing to discard\n")
+                    parameter = input("\nGive a smoothing parameter for the low pass filter: 0<=p<=1, \nenter nothing to discard\t")
                     if (parameter == ''):
                         break
                     parameter = float(parameter)
+                
+                '''for i in range(len(the_spectrum)):
+                        the_spectrum[i] = the_spectrum[i] * (1 - (394 * np.exp(-((i-17)**2)/(2*4.25**2)))/sum)
+                        print(((394 * np.exp(-((i-17)**2)/(2*4.25**2)))/sum))'''
 
-                #50th order polinom regression -not so good
-                '''coef_row = []
-                b = []
-                for i in range(len(the_spectrum)):
-                    temp = []
-                    for j in range(50):
-                        temp.append(np.float64(i**j))
-                    coef_row.append(temp)
-                    b.append(np.float64(the_spectrum[i]))
+                gaussian = int(input("Is a gaussian normalisation needed? 0 = no, 1 = yes\t"))
+                fit_y = []
+                if (gaussian):
 
-                solution = np.linalg.matmul(np.linalg.matmul(np.linalg.inv(np.linalg.matmul(np.matrix_transpose(coef_row), coef_row)), np.matrix_transpose(coef_row)), b)
-                s = np.matrix.tolist(solution)
+                    #gaussian curve regression
+                    def Gauss(x, a, sigma, mu):
+                        return a * np.exp(-((x-mu)**2)/(2*sigma**2))
 
-                ys = []
-                xs = []
-                for i in range(2048):
-                    temp_ys = 0
-                    for j in range(50):
-                        temp_ys += s[j]*(i*len(b)/2048)**j
-                    ys.append(temp_ys)
-                    xs.append(i*len(b)/2048)'''
+                    parameters, _ = curve_fit(Gauss, np.array(channel_number), np.array(the_spectrum))
+                    fit_a, fit_sigma, fit_mu = parameters
+                    print(parameters)
+                    fit_y = Gauss(np.array(channel_number), fit_a, fit_sigma, fit_mu)
+                    plt.plot(channel_number, fit_y, 'green', linewidth=1)
 
                 if (parameter != ''):
                     xs = [0]
@@ -380,19 +382,17 @@ def Display():
                             ys.append(parameter * ys[i-1] + (1-parameter) * the_spectrum[i])
                     plt.plot(xs, ys, 'red', linewidth=1)
                 
-                
                 if (parameter == ''):
                     plt.bar(channel_number, the_spectrum, color='black', align='center', width = 1)
                 plt.title('Spectrum')
                 plt.xlabel('Channel number')
                 plt.ylabel('Counts')
                 plt.show()
-                
 
         if pos_types[k] == 'Selftest':
             the_selftest = Data_buffer[positions[k]]
             print("\n----------------------------------------------")
-            print("Results of the Selftest                      |")
+            print("Results of the Selftest                    |")
             print("----------------------------------------------")
             print("ID of the selftest request: ", the_selftest[0])
             print("Temperature: ",twos_comp(the_selftest[1], 8) - 5," °C")
@@ -426,10 +426,10 @@ def Display():
             print("Checksum:",the_selftest[15], "?=", checksum, is_checksum_ok)
             print("----------------------------------------------")
 
-        if pos_types[k] == 'Status report':
+        if pos_types[k] == 'Default status report':
             the_status_report = Data_buffer[positions[k]]
             print("\n----------------------------------------------")
-            print("Results of the Status report                 |")
+            print("Results of the default status report         |")
             print("----------------------------------------------")
             status = "UNKNOWN"
             if (the_status_report[0] == 1):
@@ -444,17 +444,15 @@ def Display():
                 status = "FINISHED"
             print("Status of Celeritas: ",status)
             print("Time of the Status report: ",the_status_report[1]*256*256*256 + the_status_report[2]*256*256 + the_status_report[3]*256 + the_status_report[4], "UNIX")
-            print("I2C cursors,")
-            print("head:", the_status_report[5], "  tail:", the_status_report[6], "  size:", the_status_report[7])
-            print("Request cursors,")
-            print("head:", the_status_report[8], "  tail:", the_status_report[9], "  size:", the_status_report[10])
+            print("Peak counter: ",the_status_report[5]*256*256*256 + the_status_report[6]*256*256 + the_status_report[7]*256 + the_status_report[8])
+            print("Request cursors:\thead:", the_status_report[9], "  tail:", the_status_report[10])
             temperature = twos_comp(the_status_report[11], 8) - 5
             if status != "IDLE":
                 print("Temperature is not measured because the status is not IDLE mode")
             else:
                 print("Temperature: ",temperature," °C")
-            print("Seconds remaining before sleep:",the_status_report[12])    
-            print("Current request ID: ", the_status_report[13])
+            print("Current request ID: ", the_status_report[12])
+            print("Number of interrupts: ",the_status_report[13])    
             checksum = 0
             for i in range(15):
                checksum += bin(the_status_report[i]).count('1')
@@ -464,6 +462,42 @@ def Display():
             print("Checksum:",the_status_report[15], "?=", checksum, is_checksum_ok)
             print("----------------------------------------------")
 
+        if pos_types[k] == 'Forced status report':
+            the_status_report = Data_buffer[positions[k]]
+            print("\n----------------------------------------------")
+            print("Results of the forced Status report             |")
+            print("----------------------------------------------")
+            status = "UNKNOWN"
+            if (the_status_report[0] == 1):
+                status = "SLEEP"
+            if (the_status_report[0] == 2):
+                status = "IDLE"
+            if (the_status_report[0] == 3):
+                status = "STARTING"
+            if (the_status_report[0] == 4):
+                status = "RUNNING"
+            if (the_status_report[0] == 5):
+                status = "FINISHED"
+            print("Status of Celeritas: ",status)
+            print("Time of the Status report: ",the_status_report[1]*256*256*256 + the_status_report[2]*256*256 + the_status_report[3]*256 + the_status_report[4], "UNIX")
+            print("I2C cursors:\tsize:", the_status_report[5], "  head:", the_status_report[6], "  tail:", the_status_report[7])
+            print("Request cursors:\tsize:", the_status_report[8], "  head:", the_status_report[9], "  tail:", the_status_report[10])
+            temperature = twos_comp(the_status_report[11], 8) - 5
+            if status != "IDLE":
+                print("Temperature is not measured because the status is not IDLE mode")
+            else:
+                print("Temperature: ",temperature," °C")
+            print("Current request ID: ", the_status_report[12])    
+            print("Seconds remaining before sleep:",the_status_report[13])    
+            checksum = 0
+            for i in range(15):
+               checksum += bin(the_status_report[i]).count('1')
+            is_checksum_ok = "INVALID"
+            if the_status_report[15] == checksum:
+                is_checksum_ok = "OK"
+            print("Checksum:",the_status_report[15], "?=", checksum, is_checksum_ok)
+            print("----------------------------------------------")
+        
 def save_data():
     if Data_buffer == []:
         print("No collected data")
